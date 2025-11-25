@@ -41,7 +41,8 @@ window.addEventListener("resize",resizeCanvas);
 
 const MAP_SIZE=3500;
 const FOOD_COUNT=800;
-const BOT_COUNT=30; // mais bots
+const BOT_COUNT=30;
+
 function lerp(a,b,t){return a+(b-a)*t;}
 
 // ---------------- GAME OBJECTS ----------------
@@ -66,7 +67,6 @@ function regenerateFood(){
 function spawnBots(){
   for(let i=0;i<BOT_COUNT;i++){
     let size=random(20,40);
-    // 25% dos bots já grandes como "online" (50-80)
     if(Math.random()<0.25) size=random(50,80);
     bots.push({
       x:random(0,MAP_SIZE),
@@ -75,7 +75,8 @@ function spawnBots(){
       speed:random(1.0,1.8),
       angle:random(0,Math.PI*2),
       aggressive:Math.random()<0.4,
-      color:`hsl(${Math.random()*360},70%,55%)`
+      color:`hsl(${Math.random()*360},70%,55%)`,
+      velAngle:0
     });
   }
 }
@@ -89,33 +90,54 @@ function updatePlayer(){
   let targetSpeed=player.speed*(18/player.size+0.45);
   let forceX=Math.cos(angle)*targetSpeed;
   let forceY=Math.sin(angle)*targetSpeed;
-  player.velX=lerp(player.velX,forceX,0.13);
-  player.velY=lerp(player.velY,forceY,0.13);
+
+  // Movimentos mais suaves
+  player.velX=lerp(player.velX,forceX,0.07); 
+  player.velY=lerp(player.velY,forceY,0.07); 
   player.x+=player.velX;
   player.y+=player.velY;
   player.x=Math.max(0,Math.min(MAP_SIZE,player.x));
   player.y=Math.max(0,Math.min(MAP_SIZE,player.y));
+
   document.getElementById("sizeDisplay").textContent=Math.floor(player.size);
 }
 
 // ---------------- CAMERA ----------------
-function updateCamera(){cam.x=lerp(cam.x,player.x,0.10); cam.y=lerp(cam.y,player.y,0.10);}
+function updateCamera(){cam.x=lerp(cam.x,player.x,0.08); cam.y=lerp(cam.y,player.y,0.08);}
 
-// ---------------- BOTS ----------------
+// ---------------- BOTS UPDATE ----------------
 function updateBots(){
   bots.forEach(bot=>{
-    let dist=Math.hypot(player.x-bot.x, player.y-bot.y);
+    let closestFood = foods.reduce((closest,f)=>{
+      let d=Math.hypot(bot.x-f.x, bot.y-f.y);
+      return (!closest||d<closest.dist)?{f:d,dist:d,obj:f}:closest;
+    }, null);
+    
+    let distPlayer=Math.hypot(player.x-bot.x, player.y-bot.y);
     let angleToPlayer=Math.atan2(player.y-bot.y, player.x-bot.x);
 
-    // bots grandes fogem devagar
-    let fleeSpeed = bot.size>40 ? bot.speed*0.5 : bot.speed;
+    // Procurar outro bot maior
+    let targetBot = null;
+    let minDist = Infinity;
+    bots.forEach(b=>{
+      if(b===bot) return;
+      let d=Math.hypot(bot.x-b.x, bot.y-b.y);
+      if(b.size>bot.size*1.05 && d<minDist){minDist=d; targetBot=b;}
+    });
 
-    if(bot.aggressive && bot.size>player.size*0.9){bot.angle=angleToPlayer;}
-    else if(player.size>bot.size*1.2 && dist<500){bot.angle=angleToPlayer+Math.PI; bot.speed=fleeSpeed;}
-    else{if(Math.random()<0.01) bot.angle=random(0,Math.PI*2); bot.speed=random(1.0,1.8);}
+    // Ajuste de ângulo suavizado
+    let desiredAngle = bot.angle;
+    if(targetBot && Math.random()<0.8) desiredAngle=Math.atan2(targetBot.y-bot.y, targetBot.x-bot.x);
+    else if(bot.aggressive && bot.size>player.size*0.9 && distPlayer<500) desiredAngle=angleToPlayer;
+    else if(player.size>bot.size*1.2 && distPlayer<500) desiredAngle=angleToPlayer+Math.PI;
+    else if(closestFood) desiredAngle=Math.atan2(closestFood.obj.y-bot.y, closestFood.obj.x-bot.x);
+    else if(Math.random()<0.01) desiredAngle=random(0,Math.PI*2);
 
-    bot.x+=Math.cos(bot.angle)*bot.speed;
-    bot.y+=Math.sin(bot.angle)*bot.speed;
+    bot.angle=lerp(bot.angle,desiredAngle,0.05); // mais suave
+    let moveSpeed = bot.speed * (bot.size>50?0.5:1); // grandes mais lentos
+    bot.x+=Math.cos(bot.angle)*moveSpeed;
+    bot.y+=Math.sin(bot.angle)*moveSpeed;
+
     bot.x=Math.max(0,Math.min(MAP_SIZE,bot.x));
     bot.y=Math.max(0,Math.min(MAP_SIZE,bot.y));
   });
