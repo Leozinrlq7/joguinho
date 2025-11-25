@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Mini Blob Arena</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+body, html {margin:0; padding:0; width:100%; height:100%; overflow:hidden;}
+canvas {position:absolute; top:0; left:0; background: radial-gradient(circle, #1e293b, #0f172a);}
+#minimapContainer {position:absolute; top:10px; left:10px; width:150px; height:150px; border-radius:50%; background: rgba(0,0,0,0.5); border:2px solid #fff; z-index:20; overflow:hidden;}
+#minimapCanvas {width:100%; height:100%;}
+</style>
+</head>
+<body>
+
+<div id="minimapContainer">
+  <canvas id="minimapCanvas"></canvas>
+</div>
+<div class="absolute top-[170px] left-4 z-10 text-white text-xl font-semibold drop-shadow-lg">
+  Tamanho: <span id="sizeDisplay">10</span>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// ---------------- CONFIG ----------------
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const minimapCanvas = document.getElementById("minimapCanvas");
+const minimapCtx = minimapCanvas.getContext("2d");
+
+function resizeCanvas(){
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+  minimapCanvas.width=150;
+  minimapCanvas.height=150;
+}
+resizeCanvas();
+window.addEventListener("resize",resizeCanvas);
+
+const MAP_SIZE=3500;
+const FOOD_COUNT=800;
+const BOT_COUNT=30; // mais bots
+function lerp(a,b,t){return a+(b-a)*t;}
+
+// ---------------- GAME OBJECTS ----------------
+let player={x:MAP_SIZE/2,y:MAP_SIZE/2,velX:0,velY:0,size:30,speed:2.4,color:"#4ade80"};
+let cam={x:player.x,y:player.y};
+let foods=[], bots=[];
+let mouse={x:0,y:0};
+
+// ---------------- SPAWN ----------------
+function random(min,max){return Math.random()*(max-min)+min;}
+function spawnFoods(){
+  for(let i=0;i<FOOD_COUNT;i++){
+    foods.push({x:random(0,MAP_SIZE),y:random(0,MAP_SIZE),size:5,color:`hsl(${Math.random()*360},80%,60%)`});
+  }
+}
+function regenerateFood(){
+  while(foods.length<600){
+    foods.push({x:random(0,MAP_SIZE),y:random(0,MAP_SIZE),size:5,color:`hsl(${Math.random()*360},80%,60%)`});
+  }
+}
+
+function spawnBots(){
+  for(let i=0;i<BOT_COUNT;i++){
+    let size=random(20,40);
+    // 25% dos bots já grandes como "online" (50-80)
+    if(Math.random()<0.25) size=random(50,80);
+    bots.push({
+      x:random(0,MAP_SIZE),
+      y:random(0,MAP_SIZE),
+      size:size,
+      speed:random(1.0,1.8),
+      angle:random(0,Math.PI*2),
+      aggressive:Math.random()<0.4,
+      color:`hsl(${Math.random()*360},70%,55%)`
+    });
+  }
+}
+
+// ---------------- INPUT ----------------
+window.addEventListener("mousemove",(e)=>{mouse.x=e.clientX; mouse.y=e.clientY;});
+
+// ---------------- PLAYER UPDATE ----------------
+function updatePlayer(){
+  let angle=Math.atan2(mouse.y-canvas.height/2, mouse.x-canvas.width/2);
+  let targetSpeed=player.speed*(18/player.size+0.45);
+  let forceX=Math.cos(angle)*targetSpeed;
+  let forceY=Math.sin(angle)*targetSpeed;
+  player.velX=lerp(player.velX,forceX,0.13);
+  player.velY=lerp(player.velY,forceY,0.13);
+  player.x+=player.velX;
+  player.y+=player.velY;
+  player.x=Math.max(0,Math.min(MAP_SIZE,player.x));
+  player.y=Math.max(0,Math.min(MAP_SIZE,player.y));
+  document.getElementById("sizeDisplay").textContent=Math.floor(player.size);
+}
+
+// ---------------- CAMERA ----------------
+function updateCamera(){cam.x=lerp(cam.x,player.x,0.10); cam.y=lerp(cam.y,player.y,0.10);}
+
+// ---------------- BOTS ----------------
+function updateBots(){
+  bots.forEach(bot=>{
+    let dist=Math.hypot(player.x-bot.x, player.y-bot.y);
+    let angleToPlayer=Math.atan2(player.y-bot.y, player.x-bot.x);
+
+    // bots grandes fogem devagar
+    let fleeSpeed = bot.size>40 ? bot.speed*0.5 : bot.speed;
+
+    if(bot.aggressive && bot.size>player.size*0.9){bot.angle=angleToPlayer;}
+    else if(player.size>bot.size*1.2 && dist<500){bot.angle=angleToPlayer+Math.PI; bot.speed=fleeSpeed;}
+    else{if(Math.random()<0.01) bot.angle=random(0,Math.PI*2); bot.speed=random(1.0,1.8);}
+
+    bot.x+=Math.cos(bot.angle)*bot.speed;
+    bot.y+=Math.sin(bot.angle)*bot.speed;
+    bot.x=Math.max(0,Math.min(MAP_SIZE,bot.x));
+    bot.y=Math.max(0,Math.min(MAP_SIZE,bot.y));
+  });
+}
+
+// ---------------- COLLISIONS ----------------
+function checkCollisions(){
+  foods=foods.filter(f=>{let d=Math.hypot(f.x-player.x,f.y-player.y); if(d<player.size){player.size+=0.35; return false;} return true;});
+  bots.forEach(bot=>{foods=foods.filter(f=>{let d=Math.hypot(f.x-bot.x,f.y-bot.y); if(d<bot.size){bot.size+=0.35; return false;} return true;});});
+  
+  bots=bots.filter(bot=>{
+    let d=Math.hypot(bot.x-player.x,bot.y-player.y);
+    if(d<player.size && player.size>bot.size){player.size+=bot.size*0.35; return false;}
+    if(bot.size>player.size*1.05 && d<bot.size){alert("Você foi devorado! 😵"); location.reload();}
+    return true;
+  });
+
+  for(let i=0;i<bots.length;i++){
+    for(let j=i+1;j<bots.length;j++){
+      let a=bots[i], b=bots[j], dist=Math.hypot(a.x-b.x, a.y-b.y);
+      if(dist<a.size && a.size>b.size){a.size+=b.size*0.35; bots.splice(j,1); j--;}
+      else if(dist<b.size && b.size>a.size){b.size+=a.size*0.35; bots.splice(i,1); i--; break;}
+    }
+  }
+}
+
+// ---------------- RENDER ----------------
+function render(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  let offsetX=canvas.width/2-cam.x;
+  let offsetY=canvas.height/2-cam.y;
+
+  foods.forEach(f=>{ctx.fillStyle=f.color; ctx.beginPath(); ctx.arc(f.x+offsetX,f.y+offsetY,f.size,0,Math.PI*2); ctx.fill();});
+  bots.forEach(b=>{ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(b.x+offsetX,b.y+offsetY,b.size,0,Math.PI*2); ctx.fill();});
+  ctx.fillStyle=player.color; ctx.beginPath(); ctx.arc(canvas.width/2,canvas.height/2,player.size,0,Math.PI*2); ctx.fill();
+
+  renderMiniMap();
+}
+
+// ---------------- MINI MAP ----------------
+function renderMiniMap(){
+  const scale=minimapCanvas.width/MAP_SIZE;
+  minimapCtx.clearRect(0,0,minimapCanvas.width,minimapCanvas.height);
+  minimapCtx.save();
+  minimapCtx.beginPath();
+  minimapCtx.arc(minimapCanvas.width/2,minimapCanvas.height/2,minimapCanvas.width/2,0,Math.PI*2);
+  minimapCtx.clip();
+
+  foods.forEach(f=>{minimapCtx.fillStyle="#fff"; minimapCtx.fillRect(f.x*scale,f.y*scale,1,1);});
+  bots.forEach(b=>{minimapCtx.fillStyle=b.color; minimapCtx.beginPath(); minimapCtx.arc(b.x*scale,b.y*scale,3,0,Math.PI*2); minimapCtx.fill();});
+  minimapCtx.fillStyle=player.color; minimapCtx.beginPath(); minimapCtx.arc(player.x*scale,player.y*scale,5,0,Math.PI*2); minimapCtx.fill();
+  minimapCtx.restore();
+}
+
+// ---------------- GAME LOOP ----------------
+function gameLoop(){
+  updatePlayer();
+  updateCamera();
+  updateBots();
+  checkCollisions();
+  regenerateFood();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+// ---------------- START ----------------
+spawnFoods();
+spawnBots();
+gameLoop();
+</script>
+
+</body>
+</html>
